@@ -1,47 +1,82 @@
-from flask import Flask, request
+from flask import Flask, request, send_file
 import requests
+import json
 
-app = Flask(__name__)
+def create_app(client_id, client_secret, redirect_uri):
+    app = Flask(__name__)
+    latest_access_token = None  # pour mémoriser le dernier token reçu
 
-client_id = None
-client_secret = None
-redirect_uri = "http://localhost:5000/callback"
+    @app.route("/callback")
+    def callback():
+        nonlocal latest_access_token
+        code = request.args.get("code")
+        if not code:
+            return "No code found in request.", 400
 
-@app.route("/callback")
-def callback():
-    global client_id, client_secret
-    code = request.args.get("code")
-    if not code:
-        return "No code found in request.", 400
+        print(f"\nReceived code: {code}")
+        token_url = "https://oauth2.googleapis.com/token"
+        data = {
+            "code": code,
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "redirect_uri": redirect_uri,
+            "grant_type": "authorization_code"
+        }
 
-    print(f"Received code: {code}")
-    # Exchange code for tokens
-    token_url = "https://oauth2.googleapis.com/token"
-    data = {
-        "code": code,
-        "client_id": client_id,
-        "client_secret": client_secret,
-        "redirect_uri": redirect_uri,
-        "grant_type": "authorization_code"
-    }
+        r = requests.post(token_url, data=data)
+        if r.status_code == 200:
+            tokens = r.json()
+            print("\n✅ Access Token flow successful!")
+            print(json.dumps(tokens, indent=2))
+            latest_access_token = tokens.get("access_token")
 
-    r = requests.post(token_url, data=data)
-    if r.status_code == 200:
-        tokens = r.json()
-        print("\n✅ Access Token flow successful!")
-        print(tokens)
-        return f"<pre>{tokens}</pre>"
-    else:
-        print(f"❌ Failed to get token: {r.text}")
-        return f"Error: {r.text}", 400
+            # Save .env
+            with open(".env", "w") as f:
+                f.write(f"GOOGLE_CLIENT_ID={client_id}\n")
+                f.write(f"GOOGLE_CLIENT_SECRET={client_secret}\n")
+                f.write(f"ACCESS_TOKEN={latest_access_token}\n")
 
-if __name__ == "__main__":
-    import sys
-    if len(sys.argv) == 3:
-        client_id = sys.argv[1]
-        client_secret = sys.argv[2]
-    else:
-        client_id = input("Client ID again (for Flask): ").strip()
-        client_secret = input("Client Secret again (for Flask): ").strip()
+            # HTML success page
+            html = f"""
+<h2>✅ OAuth Success!</h2>
+<pre>{json.dumps(tokens, indent=2)}</pre>
+<p>We've created a <code>.env</code> file with your credentials.</p>
 
-    app.run(port=5000)
+<h3>🎯 Next Steps:</h3>
+<ul>
+<li><a href="/download_env" download=".env">📥 Download your .env file</a></li>
+<li>Test your ACCESS_TOKEN with Google APIs:</li>
+<pre>curl -H "Authorization: Bearer {latest_access_token}" https://www.googleapis.com/oauth2/v3/userinfo</pre>
+<li><a href="/userinfo">🔎 Try calling Google API now</a></li>
+
+<li>Add a 'Sign in with Google' button:</li>
+<pre>&lt;a href="https://accounts.google.com/o/oauth2/v2/auth?client_id={client_id}&redirect_uri={redirect_uri}&response_type=code&scope=openid email profile"&gt;
+  &lt;img src="https://developers.google.com/identity/images/btn_google_signin_dark_normal_web.png"&gt;
+&lt;/a&gt;
+</pre>
+
+<li>🚀 To go live, update your Google Console 'Authorized redirect URIs' to your production domain.</li>
+</ul>
+"""
+            return html
+        else:
+            print(f"❌ Failed to get token: {r.text}")
+            return f"Error: {r.text}", 400
+
+    @app.route("/download_env")
+    def download_env():
+        return send_file(".env", as_attachment=True)
+
+    @app.route("/userinfo")
+    def userinfo():
+        if not latest_access_token:
+            return "No access token available. Complete OAuth first.", 400
+        headers = {"Authorization": f"Bearer {latest_access_token}"}
+        r = requests.get("https://www.googleapis.com/oauth2/v3/userinfo", headers=headers)
+        if r.status_code == 200:
+            userinfo = r.json()
+            return f"<h2>🎉 Your Google Profile:</h2><pre>{json.dumps(userinfo, indent=2)}</pre>"
+        else:
+            return f"Error calling Google API: {r.text}", 400
+
+    return app
