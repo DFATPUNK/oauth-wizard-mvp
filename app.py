@@ -4,7 +4,7 @@ import json
 
 def create_app(client_id, client_secret, redirect_uri):
     app = Flask(__name__)
-    latest_access_token = None  # pour mémoriser le dernier token reçu
+    latest_access_token = None
 
     @app.route("/callback")
     def callback():
@@ -36,7 +36,6 @@ def create_app(client_id, client_secret, redirect_uri):
                 f.write(f"GOOGLE_CLIENT_SECRET={client_secret}\n")
                 f.write(f"ACCESS_TOKEN={latest_access_token}\n")
 
-            # HTML success page
             html = f"""
 <h2>✅ OAuth Success!</h2>
 <pre>{json.dumps(tokens, indent=2)}</pre>
@@ -48,13 +47,6 @@ def create_app(client_id, client_secret, redirect_uri):
 <li>Test your ACCESS_TOKEN with Google APIs:</li>
 <pre>curl -H "Authorization: Bearer {latest_access_token}" https://www.googleapis.com/oauth2/v3/userinfo</pre>
 <li><a href="/userinfo">🔎 Try calling Google API now</a></li>
-
-<li>Add a 'Sign in with Google' button:</li>
-<pre>&lt;a href="https://accounts.google.com/o/oauth2/v2/auth?client_id={client_id}&redirect_uri={redirect_uri}&response_type=code&scope=openid email profile"&gt;
-  &lt;img src="https://developers.google.com/identity/images/btn_google_signin_dark_normal_web.png"&gt;
-&lt;/a&gt;
-</pre>
-
 <li>🚀 To go live, update your Google Console 'Authorized redirect URIs' to your production domain.</li>
 </ul>
 """
