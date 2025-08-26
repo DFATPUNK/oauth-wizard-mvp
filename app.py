@@ -1,8 +1,8 @@
+# app.py
 from flask import Flask, request, send_file
-import requests
-import json
+import requests, json, os
 
-def create_app(client_id, client_secret, redirect_uri):
+def create_app(client_id, client_secret, redirect_uri, done_event=None, result_path=".last_oauth.json"):
     app = Flask(__name__)
     latest_access_token = None
 
@@ -30,26 +30,41 @@ def create_app(client_id, client_secret, redirect_uri):
             print(json.dumps(tokens, indent=2))
             latest_access_token = tokens.get("access_token")
 
-            # Save .env
+            # Persist .env
             with open(".env", "w") as f:
                 f.write(f"GOOGLE_CLIENT_ID={client_id}\n")
                 f.write(f"GOOGLE_CLIENT_SECRET={client_secret}\n")
                 f.write(f"ACCESS_TOKEN={latest_access_token}\n")
 
+            # Persist raw tokens for the CLI step
+            try:
+                os.chmod(".env", 0o600)
+            except Exception:
+                pass
+
+            if result_path:
+                with open(result_path, "w") as f:
+                    json.dump(tokens, f)
+                try:
+                    os.chmod(result_path, 0o600)
+                except Exception:
+                    pass
+
             html = f"""
 <h2>✅ OAuth Success!</h2>
-<pre>{json.dumps(tokens, indent=2)}</pre>
-<p>We've created a <code>.env</code> file with your credentials.</p>
-
-<h3>🎯 Next Steps:</h3>
+<p>You can now return to the Terminal. We saved your credentials in <code>.env</code> and analysis will continue there.</p>
 <ul>
-<li><a href="/download_env" download=".env">📥 Download your .env file</a></li>
-<li>Test your ACCESS_TOKEN with Google APIs:</li>
-<pre>curl -H "Authorization: Bearer {latest_access_token}" https://www.googleapis.com/oauth2/v3/userinfo</pre>
-<li><a href="/userinfo">🔎 Try calling Google API now</a></li>
-<li>🚀 To go live, update your Google Console 'Authorized redirect URIs' to your production domain.</li>
+  <li><a href="/download_env" download=".env">📥 Download your .env file</a></li>
+  <li><a href="/userinfo">🔎 Try calling Google API now</a></li>
 </ul>
 """
+            # signal the CLI to continue
+            if done_event:
+                try:
+                    done_event.set()
+                except Exception:
+                    pass
+
             return html
         else:
             print(f"❌ Failed to get token: {r.text}")
@@ -64,7 +79,7 @@ def create_app(client_id, client_secret, redirect_uri):
         if not latest_access_token:
             return "No access token available. Complete OAuth first.", 400
         headers = {"Authorization": f"Bearer {latest_access_token}"}
-        r = requests.get("https://www.googleapis.com/oauth2/v3/userinfo", headers=headers)
+        r = requests.get("https://www.googleapis.com/oauth2/v2/userinfo", headers=headers)
         if r.status_code == 200:
             userinfo = r.json()
             return f"<h2>🎉 Your Google Profile:</h2><pre>{json.dumps(userinfo, indent=2)}</pre>"
