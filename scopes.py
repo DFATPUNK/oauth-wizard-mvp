@@ -1,201 +1,145 @@
-# scopes.py
+"""Utilities for working with OAuth scopes and discovery catalogs."""
+from __future__ import annotations
+
+from typing import Callable, Dict, Iterable, List, Tuple
+
 import requests
-from urllib.parse import urlencode
 
-# ===============================
-# CONFIG
-# ===============================
+from providers.base import OAuthProvider
 
-GOOGLE_API_MAP = {
-    "Gmail":    {"name": "gmail",    "version": "v1"},
-    "Calendar": {"name": "calendar", "version": "v3"},
-    "Drive":    {"name": "drive",    "version": "v3"},
-    "Sheets":   {"name": "sheets",   "version": "v4"},
-}
+DiscoveryHandler = Callable[[Dict], List[Dict]]
 
-# Groupes de scopes (read / write) par service
-SCOPE_GROUPS = {
-    "Gmail": {
-        "read":  ["https://www.googleapis.com/auth/gmail.readonly"],
-        "write": ["https://www.googleapis.com/auth/gmail.send"],
-    },
-    "Calendar": {
-        "read":  ["https://www.googleapis.com/auth/calendar.events.readonly"],
-        "write": ["https://www.googleapis.com/auth/calendar.events"],
-    },
-    "Drive": {
-        "read":  ["https://www.googleapis.com/auth/drive.readonly"],
-        "write": ["https://www.googleapis.com/auth/drive.file"],  # écriture limitée
-    },
-    "Sheets": {
-        "read":  ["https://www.googleapis.com/auth/spreadsheets.readonly"],
-        "write": ["https://www.googleapis.com/auth/spreadsheets"],
-    },
-}
+_DISCOVERY_HANDLERS: Dict[str, DiscoveryHandler] = {}
 
-# Bundle "services → tous scopes read+write"
-SERVICES = {
-    svc: {
-        "scopes": sorted(set(SCOPE_GROUPS[svc]["read"] + SCOPE_GROUPS[svc]["write"])),
-        "info_gain": {
-            "read":  f"{svc} read access",
-            "write": f"{svc} write access",
-            "both":  f"{svc} read & write access",
-        }
-    }
-    for svc in SCOPE_GROUPS.keys()
-}
 
-# ===============================
-# Scopes actuels d'un token
-# ===============================
+def register_discovery_handler(name: str, handler: DiscoveryHandler) -> None:
+    _DISCOVERY_HANDLERS[name] = handler
 
-def get_token_scopes(access_token: str) -> list[str]:
-    """Retourne la liste de scopes d'un access_token via tokeninfo."""
-    try:
-        r = requests.get(f"https://www.googleapis.com/oauth2/v3/tokeninfo?access_token={access_token}", timeout=10)
-        if r.status_code == 200:
-            return r.json().get("scope", "").split()
-        return []
-    except Exception:
-        return []
 
-# ===============================
-# Découverte des méthodes Google
-# ===============================
+# ---------------------------------------------------------------------------
+# Discovery helpers
+# ---------------------------------------------------------------------------
 
-def _fetch_discovery_rest(api_name: str, version: str) -> dict | None:
-    """Récupère le JSON de discovery pour une API donnée."""
+
+def _fetch_discovery_rest(api_name: str, version: str) -> Dict | None:
     url = f"https://www.googleapis.com/discovery/v1/apis/{api_name}/{version}/rest"
-    r = requests.get(url, timeout=15)
-    if r.status_code == 200:
-        return r.json()
+    response = requests.get(url, timeout=15)
+    if response.status_code == 200:
+        return response.json()
     return None
 
-def _extract_methods(doc: dict) -> list[dict]:
-    """
-    Extrait toutes les méthodes (httpMethod, path, description, scopes) en parcourant récursivement resources.
-    """
-    methods = []
 
-    def walk_resources(resources: dict, prefix: str = ""):
+def _extract_methods(doc: Dict) -> List[Dict]:
+    methods: List[Dict] = []
+
+    def walk(resources: Dict) -> None:
         if not resources:
             return
-        for res_name, res in resources.items():
-            new_prefix = prefix
-            # Les methods ont un 'path' relatif (souvent sans le nom de res), on garde juste path fourni
-            if "methods" in res:
-                for mname, m in res["methods"].items():
-                    methods.append({
-                        "httpMethod": m.get("httpMethod", "GET"),
-                        "path": m.get("path", ""),
-                        "description": m.get("description", ""),
-                        "scopes": m.get("scopes", []),
-                    })
-            # recurse
-            if "resources" in res:
-                walk_resources(res["resources"], new_prefix)
+        for _, resource in resources.items():
+            if "methods" in resource:
+                for _, method in resource["methods"].items():
+                    methods.append(
+                        {
+                            "httpMethod": method.get("httpMethod", "GET"),
+                            "path": method.get("path", ""),
+                            "description": method.get("description", ""),
+                            "scopes": method.get("scopes", []),
+                        }
+                    )
+            if "resources" in resource:
+                walk(resource["resources"])
 
-    walk_resources(doc.get("resources", {}))
+    walk(doc.get("resources", {}))
     return methods
 
-def discover_methods_for_service(service: str) -> list[dict]:
-    """Télécharge et retourne la liste des méthodes pour un service (Gmail/Drive/Calendar/Sheets)."""
-    meta = GOOGLE_API_MAP.get(service)
-    if not meta:
+
+def _google_discovery_handler(config: Dict) -> List[Dict]:
+    api = config.get("api")
+    version = config.get("version")
+    if not api or not version:
         return []
-    doc = _fetch_discovery_rest(meta["name"], meta["version"])
+    doc = _fetch_discovery_rest(api, version)
     if not doc:
         return []
     return _extract_methods(doc)
 
-def filter_methods_by_scopes(methods: list[dict], candidate_scopes: list[str]) -> list[dict]:
-    """
-    Garde les méthodes dont AU MOINS un scope requis appartient à candidate_scopes.
-    (Beaucoup de méthodes google déclarent un OU logique sur les scopes.)
-    """
-    cand = set(candidate_scopes)
-    allowed = []
-    for m in methods:
-        req = set(m.get("scopes", []))
-        if not req or (req & cand):
-            allowed.append(m)
+
+register_discovery_handler("google_discovery", _google_discovery_handler)
+
+
+def discover_methods_for_service(provider: OAuthProvider, service: str) -> List[Dict]:
+    meta = provider.discovery_metadata.get(service)
+    if not meta:
+        return []
+    if "methods" in meta and isinstance(meta["methods"], list):
+        return meta["methods"]
+    handler_name = meta.get("type")
+    if handler_name and handler_name in _DISCOVERY_HANDLERS:
+        return _DISCOVERY_HANDLERS[handler_name](meta)
+    handler = meta.get("handler")
+    if callable(handler):
+        return handler(meta)
+    return []
+
+
+def filter_methods_by_scopes(methods: List[Dict], candidate_scopes: Iterable[str]) -> List[Dict]:
+    allowed: List[Dict] = []
+    candidate_set = set(candidate_scopes)
+    for method in methods:
+        required = set(method.get("scopes", []))
+        if not required or required & candidate_set:
+            allowed.append(method)
     return allowed
 
-def count_methods(service: str, candidate_scopes: list[str]) -> tuple[int, list[dict]]:
-    """Compte le nombre de méthodes accessibles pour un service donné avec un ensemble de scopes."""
-    methods = discover_methods_for_service(service)
+
+def count_methods(provider: OAuthProvider, service: str, candidate_scopes: Iterable[str]) -> Tuple[int, List[Dict]]:
+    methods = discover_methods_for_service(provider, service)
     allowed = filter_methods_by_scopes(methods, candidate_scopes)
-    return len(allowed), allowed[:10]  # on renvoie quelques exemples
+    return len(allowed), allowed[:10]
 
-# ===============================
-# Analyse des gaps par rapport aux services
-# ===============================
 
-def analyze_scope_gap(current_scopes: list[str]):
-    """
-    Retourne (résumé_par_service, missing_all_scopes)
-    résumé_par_service: [{ service, read_missing, write_missing, both_missing, examples }]
-    """
+# ---------------------------------------------------------------------------
+# Scope analysis
+# ---------------------------------------------------------------------------
+
+
+def get_token_scopes(provider: OAuthProvider, access_token: str) -> List[str]:
+    return provider.fetch_token_scopes(access_token)
+
+
+def analyze_scope_gap(provider: OAuthProvider, current_scopes: Iterable[str]):
     results = []
-    missing_all = []
-    cur = set(current_scopes)
+    missing_all: List[str] = []
+    current = set(current_scopes)
 
-    for service, cfg in SCOPE_GROUPS.items():
-        read_scopes  = cfg["read"]
-        write_scopes = cfg["write"]
+    for service, groups in provider.scope_groups.items():
+        read_scopes = groups.get("read", [])
+        write_scopes = groups.get("write", [])
 
-        read_missing  = [s for s in read_scopes  if s not in cur]
-        write_missing = [s for s in write_scopes if s not in cur]
+        read_missing = [scope for scope in read_scopes if scope not in current]
+        write_missing = [scope for scope in write_scopes if scope not in current]
 
         if read_missing:
             missing_all.extend(read_missing)
         if write_missing:
             missing_all.extend(write_missing)
 
-        results.append({
-            "service": service,
-            "read_missing":  read_missing,
-            "write_missing": write_missing,
-            "both_missing":  sorted(set(read_missing + write_missing)),
-        })
+        results.append(
+            {
+                "service": service,
+                "read_missing": read_missing,
+                "write_missing": write_missing,
+                "both_missing": sorted(set(read_missing + write_missing)),
+            }
+        )
 
     return results, sorted(set(missing_all))
 
-# ===============================
-# Génération d'URL de réauth
-# ===============================
 
-def generate_reauth_url(client_id: str, redirect_uri: str, scopes: list[str]) -> str:
-    base_url = "https://accounts.google.com/o/oauth2/v2/auth"
-    params = {
-        "client_id": client_id,
-        "redirect_uri": redirect_uri,
-        "response_type": "code",
-        "scope": " ".join(scopes),
-        "access_type": "offline",
-        "prompt": "consent"
-    }
-    return f"{base_url}?{urlencode(params)}"
+def generate_reauth_url(provider: OAuthProvider, client_id: str, redirect_uri: str, scopes: Iterable[str]) -> str:
+    return provider.build_authorization_url(client_id, redirect_uri, scopes)
 
-# ===============================
-# Endpoints utilisables avec userinfo.*
-# ===============================
 
-def oauth2_userinfo_endpoints() -> list[dict]:
-    return [
-        {
-            "service": "Google OAuth2",
-            "method": "GET",
-            "url": "https://www.googleapis.com/oauth2/v2/userinfo",
-            "requires": ["https://www.googleapis.com/auth/userinfo.profile", "https://www.googleapis.com/auth/userinfo.email"],
-            "example": "curl -H 'Authorization: Bearer $ACCESS_TOKEN' https://www.googleapis.com/oauth2/v2/userinfo"
-        },
-        {
-            "service": "Google OAuth2",
-            "method": "GET",
-            "url": "https://www.googleapis.com/oauth2/v3/tokeninfo?access_token=$ACCESS_TOKEN",
-            "requires": [],
-            "example": "curl 'https://www.googleapis.com/oauth2/v3/tokeninfo?access_token=$ACCESS_TOKEN'"
-        }
-    ]
+def oauth2_userinfo_endpoints(provider: OAuthProvider):
+    return provider.userinfo_endpoints()
+
