@@ -1,7 +1,18 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Callable, Dict, Iterable, List, Optional, Protocol
+from typing import Any, Callable, Dict, Iterable, List, Optional, Protocol
+
+
+def _default_prompt(message: str) -> str:
+    return input(f"{message} ➔ ")
+
+
+def _default_confirm(message: str) -> bool:
+    answer = input(f"{message} [Y/n] ➔ ").strip().lower()
+    if not answer:
+        return True
+    return answer.startswith("y")
 
 
 @dataclass
@@ -38,6 +49,11 @@ class ProviderContext:
     client_secret: str
     redirect_uri: str
     access_token: str
+    http_client: Any = None
+    prompt: Callable[[str], str] = _default_prompt
+    confirm: Callable[[str], bool] = _default_confirm
+    echo: Callable[[str], None] = print
+    open_browser: Callable[[str], None] = lambda _url: None
 
 
 class OAuthProvider(Protocol):
