@@ -31,6 +31,9 @@ def _fetch_discovery_rest(api_name: str, version: str) -> Dict | None:
 
 def _extract_methods(doc: Dict) -> List[Dict]:
     methods: List[Dict] = []
+    base_url = doc.get("baseUrl") or "".join(
+        part for part in [doc.get("rootUrl", ""), doc.get("servicePath", "")] if part
+    )
 
     def walk(resources: Dict) -> None:
         if not resources:
@@ -44,6 +47,7 @@ def _extract_methods(doc: Dict) -> List[Dict]:
                             "path": method.get("path", ""),
                             "description": method.get("description", ""),
                             "scopes": method.get("scopes", []),
+                            "baseUrl": base_url,
                         }
                     )
             if "resources" in resource:

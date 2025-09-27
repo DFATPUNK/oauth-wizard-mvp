@@ -60,10 +60,30 @@ class GoogleProvider:
             },
         }
         self.discovery_metadata = {
-            "Gmail": {"type": "google_discovery", "api": "gmail", "version": "v1"},
-            "Calendar": {"type": "google_discovery", "api": "calendar", "version": "v3"},
-            "Drive": {"type": "google_discovery", "api": "drive", "version": "v3"},
-            "Sheets": {"type": "google_discovery", "api": "sheets", "version": "v4"},
+            "Gmail": {
+                "type": "google_discovery",
+                "api": "gmail",
+                "version": "v1",
+                "docs_url": "https://developers.google.com/gmail/api/reference/rest",
+            },
+            "Calendar": {
+                "type": "google_discovery",
+                "api": "calendar",
+                "version": "v3",
+                "docs_url": "https://developers.google.com/calendar/api/v3/reference",
+            },
+            "Drive": {
+                "type": "google_discovery",
+                "api": "drive",
+                "version": "v3",
+                "docs_url": "https://developers.google.com/drive/api/v3/reference",
+            },
+            "Sheets": {
+                "type": "google_discovery",
+                "api": "sheets",
+                "version": "v4",
+                "docs_url": "https://developers.google.com/sheets/api/reference/rest",
+            },
         }
 
     # Protocol implementation -------------------------------------------------

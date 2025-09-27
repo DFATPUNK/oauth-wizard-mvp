@@ -23,3 +23,13 @@ python -m cli.main --provider google
 ```
 
 Pass `--no-open-browser` if you prefer to open consent URLs manually.
+
+### Test authenticated API endpoints
+
+After completing the OAuth flow you can explore provider APIs without leaving the terminal:
+
+```bash
+python run.py test-endpoint --provider google
+```
+
+The tester lists documented endpoints from the provider discovery catalog, injects your current access token, and shows status codes, headers, and JSON bodies. When discovery data is unavailable, you can enter custom methods and URLs.
