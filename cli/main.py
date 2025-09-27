@@ -31,6 +31,14 @@ from scopes import (
     oauth2_userinfo_endpoints,
 )
 
+from services.zapier_sync import (
+    ZapierCLIUnavailableError,
+    ZapierCommandError,
+    ZapierConfigError,
+    ZapierNotConfiguredError,
+    sync_provider_by_id,
+)
+
 app = typer.Typer(help="Run the interactive OAuth wizard", invoke_without_command=True)
 
 
@@ -650,6 +658,30 @@ def _execute_wizard(
             typer.echo("\n✅ Re-auth complete. Updated scopes loaded.")
             _display_capabilities(provider, current_scopes)
             continue
+
+
+@app.command("sync-zapier")
+def sync_zapier(
+    provider_id: str = typer.Option(None, "--provider", "-p", help="Provider id to sync."),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Preview actions without invoking the Zapier CLI."),
+) -> None:
+    """Scaffold missing Zapier components and push the Zapier app for the provider."""
+
+    provider: OAuthProvider = _choose_provider(provider_id)
+    try:
+        sync_provider_by_id(provider.id, dry_run=dry_run, echo=typer.echo)
+    except ZapierNotConfiguredError as exc:
+        typer.echo(f"⚠️ {exc}")
+        raise typer.Exit(code=1)
+    except ZapierCLIUnavailableError as exc:
+        typer.echo(f"⚠️ {exc}")
+        raise typer.Exit(code=1)
+    except ZapierConfigError as exc:
+        typer.echo(f"⚠️ {exc}")
+        raise typer.Exit(code=1)
+    except ZapierCommandError as exc:
+        typer.echo(str(exc))
+        raise typer.Exit(code=1)
 
 
 @app.command()
