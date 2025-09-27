@@ -1,134 +1,34 @@
 from __future__ import annotations
 
-import base64
 import json
 import re
-import webbrowser
-from email.mime.text import MIMEText
-from typing import Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Optional
 
 import requests
 
-from .base import EndpointInfo, ProviderAction, ProviderContext
+from providers.base import EndpointInfo, ProviderAction, ProviderContext
+from services.gmail import (
+    GmailServiceDisabledError,
+    GmailServiceError,
+    get_message as gmail_get_message,
+    list_messages as gmail_list_messages,
+    send_email as gmail_send_email,
+)
 
 
-def _parse_project_number(client_id: str) -> Optional[str]:
-    if "-" in client_id:
-        prefix = client_id.split("-", 1)[0]
-        if prefix.isdigit():
-            return prefix
-    return None
+def _handle_service_disabled(ctx: ProviderContext, exc: GmailServiceDisabledError) -> None:
+    project = exc.project or "this project"
+    ctx.echo(f"\n⚙️  The Gmail API is disabled for {project}.")
+    ctx.echo(f"👉 Enable it here:\n   {exc.enable_url}\n")
+    if ctx.confirm("Open the enable page in your browser now?"):
+        ctx.open_browser(exc.enable_url)
+        ctx.echo("⏳ Wait ~1 minute after enabling, then retry the action.")
 
 
-def _open_enable_api_link(api_name: str, client_id: str):
-    project = _parse_project_number(client_id) or ""
-    url = f"https://console.developers.google.com/apis/api/{api_name}/overview?project={project}"
-    print(f"\n⚙️  This API is disabled for project {project}.")
-    print(f"👉 Enable it here:\n   {url}\n")
-    input("Press Enter to open the enable page…")
-    webbrowser.open(url)
-    print("⏳ Wait ~1 minute after enabling, then retry the action.")
-
-
-def _maybe_handle_service_disabled(resp_text: str, client_id: str, api_name: str) -> bool:
-    try:
-        data = json.loads(resp_text)
-        err = data.get("error", {})
-        status = err.get("status")
-        details = err.get("details", [])
-        if status == "PERMISSION_DENIED":
-            for detail in details:
-                if detail.get("@type", "").endswith("ErrorInfo") and detail.get("reason") == "SERVICE_DISABLED":
-                    _open_enable_api_link(api_name, client_id)
-                    return True
-    except Exception:
-        pass
-    return False
-
-
-def _gmail_list_messages(context: ProviderContext, max_results: int = 5, query: str | None = None):
-    params: Dict[str, str] = {"maxResults": str(max_results)}
-    if query:
-        params["q"] = query
-    response = requests.get(
-        "https://gmail.googleapis.com/gmail/v1/users/me/messages",
-        headers={"Authorization": f"Bearer {context.access_token}"},
-        params=params,
-        timeout=20,
-    )
-    if response.status_code != 200:
-        if response.status_code == 403 and _maybe_handle_service_disabled(response.text, context.client_id, "gmail.googleapis.com"):
-            return None
-        print(f"❌ Gmail list error: {response.status_code} {response.text}")
-        return []
-
-    message_ids = [m.get("id") for m in response.json().get("messages", []) if m.get("id")]
-    results = []
-    for message_id in message_ids:
-        detail = requests.get(
-            f"https://gmail.googleapis.com/gmail/v1/users/me/messages/{message_id}",
-            headers={"Authorization": f"Bearer {context.access_token}"},
-            params={
-                "format": "metadata",
-                "metadataHeaders": ["From", "Subject", "Date"],
-            },
-            timeout=20,
-        )
-        if detail.status_code == 200:
-            meta = detail.json()
-            headers = {h.get("name"): h.get("value") for h in meta.get("payload", {}).get("headers", [])}
-            results.append(
-                {
-                    "id": message_id,
-                    "from": headers.get("From", ""),
-                    "subject": headers.get("Subject", ""),
-                    "date": headers.get("Date", ""),
-                    "snippet": meta.get("snippet", ""),
-                }
-            )
-        elif detail.status_code == 403 and _maybe_handle_service_disabled(detail.text, context.client_id, "gmail.googleapis.com"):
-            return None
-    return results
-
-
-def _gmail_get_message(context: ProviderContext, message_id: str):
-    response = requests.get(
-        f"https://gmail.googleapis.com/gmail/v1/users/me/messages/{message_id}",
-        headers={"Authorization": f"Bearer {context.access_token}"},
-        params={"format": "full"},
-        timeout=20,
-    )
-    if response.status_code == 200:
-        return response.json()
-    if response.status_code == 403 and _maybe_handle_service_disabled(response.text, context.client_id, "gmail.googleapis.com"):
-        return None
-    print(f"❌ Gmail get error: {response.status_code} {response.text}")
-    return None
-
-
-def _gmail_send_email(context: ProviderContext, to_addr: str, subject: str, body: str):
-    mime = MIMEText(body)
-    mime["to"] = to_addr
-    mime["subject"] = subject
-    raw = base64.urlsafe_b64encode(mime.as_bytes()).decode("utf-8")
-    payload = {"raw": raw}
-    response = requests.post(
-        "https://gmail.googleapis.com/gmail/v1/users/me/messages/send",
-        headers={
-            "Authorization": f"Bearer {context.access_token}",
-            "Content-Type": "application/json",
-        },
-        json=payload,
-        timeout=20,
-    )
-    if response.status_code in (200, 202):
-        data = response.json()
-        print(f"✅ Email sent. Gmail message id: {data.get('id')}")
-        return data
-    if response.status_code == 403 and _maybe_handle_service_disabled(response.text, context.client_id, "gmail.googleapis.com"):
-        return None
-    print(f"❌ Gmail send error: {response.status_code} {response.text}")
-    return None
+def _require_http_client(ctx: ProviderContext):
+    if ctx.http_client is None:
+        raise RuntimeError("ProviderContext.http_client is required for Gmail actions.")
+    return ctx.http_client
 
 
 class GoogleProvider:
@@ -267,40 +167,68 @@ class GoogleProvider:
         gmail_send_scopes = self.scope_groups["Gmail"]["write"]
 
         def list_messages(ctx: ProviderContext) -> None:
-            items = _gmail_list_messages(ctx, max_results=5)
-            if items is None:
-                input("After enabling Gmail API, press Enter to retry listing…")
-                items = _gmail_list_messages(ctx, max_results=5)
-            if not items:
-                print("No messages found.")
+            http_client = _require_http_client(ctx)
+            try:
+                items = gmail_list_messages(http_client, ctx.access_token, ctx.client_id, max_results=5)
+            except GmailServiceDisabledError as exc:
+                _handle_service_disabled(ctx, exc)
                 return
-            print("\n📬 Last messages:")
+            except GmailServiceError as exc:
+                ctx.echo(str(exc))
+                return
+            if not items:
+                ctx.echo("No messages found.")
+                return
+            ctx.echo("\n📬 Last messages:")
             for item in items:
-                print(
-                    f"- id={item['id']}\n  From: {item['from']}\n  Subject: {item['subject']}\n  "
-                    f"Date: {item['date']}\n  Snippet: {item['snippet']}\n"
+                ctx.echo(
+                    "- id={id}\n  From: {from}\n  Subject: {subject}\n  Date: {date}\n  Snippet: {snippet}\n".format(**item)
                 )
 
         def read_message(ctx: ProviderContext) -> None:
-            message_id = input("Enter Gmail message id to fetch ➔ ").strip()
+            message_id = ctx.prompt("Enter Gmail message id to fetch")
             if not message_id:
-                print("⚠️ Missing id.")
+                ctx.echo("⚠️ Missing id.")
                 return
-            message = _gmail_get_message(ctx, message_id)
-            if message is None:
-                input("After enabling Gmail API (if needed), press Enter to retry…")
-                message = _gmail_get_message(ctx, message_id)
-            if message:
-                print(json.dumps(message, indent=2))
+            http_client = _require_http_client(ctx)
+            try:
+                message = gmail_get_message(http_client, ctx.access_token, ctx.client_id, message_id)
+            except GmailServiceDisabledError as exc:
+                _handle_service_disabled(ctx, exc)
+                return
+            except GmailServiceError as exc:
+                ctx.echo(str(exc))
+                return
+            ctx.echo(json.dumps(message, indent=2))
 
         def send_email(ctx: ProviderContext) -> None:
-            to_addr = input("To ➔ ").strip()
-            subject = input("Subject ➔ ").strip()
-            body = input("Body ➔ ").strip()
-            response = _gmail_send_email(ctx, to_addr, subject, body)
-            if response is None:
-                input("After enabling Gmail API (if needed), press Enter to retry send…")
-                _gmail_send_email(ctx, to_addr, subject, body)
+            to_addr = ctx.prompt("To")
+            subject = ctx.prompt("Subject")
+            body = ctx.prompt("Body")
+            if not to_addr:
+                ctx.echo("⚠️ Missing recipient email address.")
+                return
+            http_client = _require_http_client(ctx)
+            try:
+                response = gmail_send_email(
+                    http_client,
+                    ctx.access_token,
+                    ctx.client_id,
+                    to_addr,
+                    subject,
+                    body,
+                )
+            except GmailServiceDisabledError as exc:
+                _handle_service_disabled(ctx, exc)
+                return
+            except GmailServiceError as exc:
+                ctx.echo(str(exc))
+                return
+            message_id = response.get("id")
+            if message_id:
+                ctx.echo(f"✅ Email sent. Gmail message id: {message_id}")
+            else:
+                ctx.echo("✅ Email sent.")
 
         return [
             ProviderAction(
