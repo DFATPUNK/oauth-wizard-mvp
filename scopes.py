@@ -71,6 +71,36 @@ def _google_discovery_handler(config: Dict) -> List[Dict]:
 register_discovery_handler("google_discovery", _google_discovery_handler)
 
 
+def _method_catalog_handler(config: Dict) -> List[Dict]:
+    methods: List[Dict] = []
+    base_url = config.get("base_url", "")
+    for entry in config.get("method_map", []):
+        if not isinstance(entry, dict):
+            continue
+        path = entry.get("path") or entry.get("endpoint") or entry.get("name")
+        if not path:
+            continue
+        http_method = entry.get("httpMethod") or entry.get("http_method") or entry.get("method") or "GET"
+        description = entry.get("description", "")
+        scopes = entry.get("scopes", [])
+        methods.append(
+            {
+                "httpMethod": str(http_method).upper(),
+                "path": path,
+                "description": description,
+                "scopes": scopes if isinstance(scopes, list) else [str(scopes)],
+                "baseUrl": base_url,
+            }
+        )
+    return methods
+
+
+register_discovery_handler("basecamp_catalog", _method_catalog_handler)
+register_discovery_handler("slack_web_api", _method_catalog_handler)
+register_discovery_handler("trello_catalog", _method_catalog_handler)
+register_discovery_handler("notion_catalog", _method_catalog_handler)
+
+
 def discover_methods_for_service(provider: OAuthProvider, service: str) -> List[Dict]:
     meta = provider.discovery_metadata.get(service)
     if not meta:

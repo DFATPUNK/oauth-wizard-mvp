@@ -1,3 +1,4 @@
+import pytest
 from typer.testing import CliRunner
 
 from cli import main as cli_main
@@ -129,3 +130,32 @@ def test_test_endpoint_command_bootstraps_and_runs(monkeypatch):
             "browser-opener",
         )
     ]
+
+
+@pytest.mark.parametrize(
+    "provider_id",
+    ["google", "github", "basecamp", "slack", "trello", "notion"],
+)
+def test_choose_provider_by_id_returns_registered_provider(provider_id):
+    provider = cli_main._choose_provider(provider_id)
+    assert provider.id == provider_id
+
+
+@pytest.mark.parametrize(
+    "provider_id",
+    ["github", "basecamp", "slack", "trello", "notion"],
+)
+def test_render_menu_includes_provider_actions(provider_id):
+    provider = cli_main._choose_provider(provider_id)
+    menu = cli_main._render_menu(provider, provider.base_scopes)
+    assert any(entry[0] == "provider_action" for entry in menu)
+
+
+@pytest.mark.parametrize(
+    "provider_id",
+    ["basecamp", "slack", "trello", "notion"],
+)
+def test_discovered_services_present_for_new_providers(provider_id):
+    provider = cli_main._choose_provider(provider_id)
+    discovered = cli_main._list_discovered_services(provider)
+    assert discovered, f"Expected discovery metadata for {provider_id}"
