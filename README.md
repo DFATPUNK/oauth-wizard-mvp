@@ -24,6 +24,14 @@ python -m cli.main --provider google
 
 Pass `--no-open-browser` if you prefer to open consent URLs manually.
 
+## Testing
+
+Run the unit test suite with [pytest](https://docs.pytest.org/) to validate OAuth helpers, scope analysis, and CLI routing logic. Keeping these tests green helps ensure we don’t regress the interactive workflows.
+
+```bash
+pytest
+```
+
 ### Test authenticated API endpoints
 
 After completing the OAuth flow you can explore provider APIs without leaving the terminal:
