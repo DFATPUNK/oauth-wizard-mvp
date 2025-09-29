@@ -1,0 +1,23 @@
+{
+  "providers": {
+    "google": {
+      "app_dir": "integrations/zapier/apps/google",
+      "description": "Demo Zapier app for OAuth Wizard Google flows.",
+      "push": true,
+      "components": [
+        {
+          "key": "gmail_new_message",
+          "type": "trigger",
+          "path": "triggers/new_message.js",
+          "description": "Detects new Gmail messages in a demo mailbox."
+        },
+        {
+          "key": "gmail_send_email",
+          "type": "action",
+          "path": "actions/send_email.js",
+          "description": "Sends a Gmail message using OAuth Wizard demo credentials."
+        }
+      ]
+    }
+  }
+}

@@ -16,6 +16,9 @@ from services.gmail import (
 )
 
 
+from services.zapier_sync import build_menu_action
+
+
 def _handle_service_disabled(ctx: ProviderContext, exc: GmailServiceDisabledError) -> None:
     project = exc.project or "this project"
     ctx.echo(f"\n⚙️  The Gmail API is disabled for {project}.")
@@ -250,7 +253,7 @@ class GoogleProvider:
             else:
                 ctx.echo("✅ Email sent.")
 
-        return [
+        actions = [
             ProviderAction(
                 key="gmail_list",
                 label="Gmail: list last 5 messages",
@@ -273,6 +276,12 @@ class GoogleProvider:
                 missing_scope_message="⚠️ Gmail SEND scope missing. Use an 'Add WRITE' option above to re-auth.",
             ),
         ]
+
+        zapier_action = build_menu_action(self.id)
+        if zapier_action:
+            actions.append(zapier_action)
+
+        return actions
 
     def welcome_text(self, redirect_uri: str) -> str:
         return (
