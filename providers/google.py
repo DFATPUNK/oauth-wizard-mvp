@@ -41,6 +41,7 @@ class GoogleProvider:
     token_endpoint = "https://oauth2.googleapis.com/token"
     userinfo_endpoint = "https://www.googleapis.com/oauth2/v2/userinfo"
     tokeninfo_endpoint = "https://www.googleapis.com/oauth2/v3/tokeninfo"
+    token_request_headers: Dict[str, str] = {}
 
     def __init__(self) -> None:
         self.base_scopes = ["openid", "email", "profile"]

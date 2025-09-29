@@ -1,6 +1,7 @@
 # app.py
 from flask import Flask, request, send_file
 import requests, json, os
+from urllib.parse import parse_qsl
 
 
 def create_app(provider, client_id, client_secret, redirect_uri, done_event=None, result_path=".last_oauth.json"):
@@ -24,9 +25,19 @@ def create_app(provider, client_id, client_secret, redirect_uri, done_event=None
             "grant_type": "authorization_code"
         }
 
-        r = requests.post(token_url, data=data)
+        headers = {}
+        provider_headers = getattr(provider, "token_request_headers", None)
+        if provider_headers:
+            headers.update(provider_headers)
+
+        r = requests.post(token_url, data=data, headers=headers or None)
         if r.status_code == 200:
-            tokens = r.json()
+            try:
+                tokens = r.json()
+            except ValueError:
+                tokens = dict(parse_qsl(r.text))
+            if not isinstance(tokens, dict):
+                tokens = dict(parse_qsl(r.text))
             print("\n✅ Access Token flow successful!")
             print(json.dumps(tokens, indent=2))
             latest_access_token = tokens.get("access_token")
