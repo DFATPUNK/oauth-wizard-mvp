@@ -64,6 +64,7 @@ class OAuthProvider(Protocol):
     token_endpoint: str
     userinfo_endpoint: Optional[str]
     tokeninfo_endpoint: Optional[str]
+    token_request_headers: Dict[str, str]
     scope_groups: Dict[str, Dict[str, List[str]]]
     discovery_metadata: Dict[str, Dict]
 
