@@ -1,6 +1,6 @@
 # OAuth Wizard MVP - Google OAuth2
 
-🚀 Minimal MVP to validate OAuth2 Authorization Code Flow with Google.
+🚀 Minimal MVP to validate OAuth2 Authorization Code Flow with multiple SaaS providers.
 
 ## Usage
 
@@ -20,6 +20,7 @@ You can also invoke the module directly:
 
 ```bash
 python -m cli.main --provider google
+python -m cli.main --provider github
 ```
 
 Pass `--no-open-browser` if you prefer to open consent URLs manually.
@@ -38,6 +39,7 @@ After completing the OAuth flow you can explore provider APIs without leaving th
 
 ```bash
 python run.py test-endpoint --provider google
+python run.py test-endpoint --provider github
 ```
 
 The tester lists documented endpoints from the provider discovery catalog, injects your current access token, and shows status codes, headers, and JSON bodies. When discovery data is unavailable, you can enter custom methods and URLs.
